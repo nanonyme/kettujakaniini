@@ -1,14 +1,26 @@
-// ── Board config ──────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────────
 let board = Array(9).fill(null); // null | 'fox' | 'rabbit'
 let currentPlayer = 'fox';
 let gameOver = false;
 
-// ── Canvas setup ──────────────────────────────────────────────────────────
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const statusEl = document.getElementById('status');
-const resetBtn = document.getElementById('resetBtn');
+// Multiplayer
+let gameMode = 'local';   // 'local' | 'host' | 'guest'
+let peer = null;
+let conn = null;
+let myRole = null;        // 'fox' | 'rabbit' (multiplayer only)
+let roundNumber = 0;
+let sessionTimer = null;
+const SESSION_SECONDS = 300; // 5 minutes
 
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const canvas      = document.getElementById('canvas');
+const ctx         = canvas.getContext('2d');
+const statusEl    = document.getElementById('status');
+const resetBtn    = document.getElementById('resetBtn');
+const lockOverlay = document.getElementById('lockOverlay');
+const roleEl      = document.getElementById('roleIndicator');
+
+// ── Canvas setup ──────────────────────────────────────────────────────────────
 function cellSize() {
   const maxW = Math.min(window.innerWidth - 32, 420);
   return Math.floor(maxW / 3);
@@ -21,9 +33,11 @@ function resizeCanvas() {
   drawAll();
 }
 
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', () => {
+  if (!document.getElementById('gameArea').classList.contains('hidden')) resizeCanvas();
+});
 
-// ── Drawing helpers ───────────────────────────────────────────────────────
+// ── Drawing helpers ───────────────────────────────────────────────────────────
 
 /** Draw a simplified red fox into a given 2D context, centred in (cx,cy) with radius r */
 function drawFox(c, cx, cy, r) {
@@ -165,7 +179,7 @@ function drawRabbit(c, cx, cy, r) {
   c.fill();
 }
 
-// ── Grid drawing ──────────────────────────────────────────────────────────
+// ── Grid drawing ──────────────────────────────────────────────────────────────
 function drawGrid() {
   const cs = cellSize();
   const w = cs * 3, h = cs * 3;
@@ -199,7 +213,7 @@ function drawAll() {
   }
 }
 
-// ── Legend canvases ───────────────────────────────────────────────────────
+// ── Legend canvases ───────────────────────────────────────────────────────────
 function drawLegends() {
   const lf = document.getElementById('legendFox');
   const lr = document.getElementById('legendRabbit');
@@ -208,7 +222,7 @@ function drawLegends() {
   drawRabbit(lr.getContext('2d'), 18, 20, 14);
 }
 
-// ── Win logic ─────────────────────────────────────────────────────────────
+// ── Win logic ─────────────────────────────────────────────────────────────────
 const WINS = [
   [0,1,2],[3,4,5],[6,7,8], // rows
   [0,3,6],[1,4,7],[2,5,8], // cols
@@ -223,19 +237,231 @@ function checkWinner() {
   return null;
 }
 
-// ── Click / tap handler ───────────────────────────────────────────────────
-function handleClick(e) {
-  if (gameOver) return;
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const x = (e.clientX - rect.left) * scaleX;
-  const y = (e.clientY - rect.top) * scaleY;
-  const cs = cellSize();
-  const col = Math.floor(x / cs), row = Math.floor(y / cs);
-  const idx = row * 3 + col;
-  if (board[idx]) return;
+// ── Multiplayer helpers ───────────────────────────────────────────────────────
 
+/** Generate a 128-bit cryptographically random token (hex string) */
+function generateToken() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function isMyTurn() {
+  return gameMode === 'local' || myRole === currentPlayer;
+}
+
+/**
+ * Even rounds: host=fox (goes first), guest=rabbit.
+ * Odd  rounds: host=rabbit, guest=fox (goes first).
+ * Fox always moves first; who IS fox alternates each round.
+ */
+function getRoundConfig(n) {
+  return n % 2 === 0
+    ? { hostRole: 'fox',    guestRole: 'rabbit' }
+    : { hostRole: 'rabbit', guestRole: 'fox' };
+}
+
+function el(id) { return document.getElementById(id); }
+function show(id) { el(id).classList.remove('hidden'); }
+function hide(id) { el(id).classList.add('hidden'); }
+
+function showMpPanel(id) {
+  ['mpChoice', 'hostPanel', 'connectingPanel'].forEach(p =>
+    el(p).classList.toggle('hidden', p !== id));
+}
+
+// ── UI navigation ─────────────────────────────────────────────────────────────
+function showModeSelect() {
+  show('modeOverlay'); hide('mpOverlay'); hide('gameArea');
+  cleanupPeer();
+}
+
+function showMultiplayerSetup() {
+  hide('modeOverlay'); show('mpOverlay'); hide('gameArea');
+  showMpPanel('mpChoice');
+  // Pre-fill token from URL hash — the #fragment is never sent to any server,
+  // so the session token never appears in GitHub or CDN access logs.
+  if (location.hash.startsWith('#kjk-')) el('tokenInput').value = location.hash.slice(5);
+}
+
+function showGameArea() {
+  hide('modeOverlay'); hide('mpOverlay'); show('gameArea');
+  resizeCanvas();
+  drawLegends();
+}
+
+function updateLockOverlay() {
+  lockOverlay.classList.toggle('hidden', gameMode === 'local' || gameOver || isMyTurn());
+}
+
+function updateRoleDisplay() {
+  if (gameMode === 'local') { roleEl.classList.add('hidden'); return; }
+  roleEl.classList.remove('hidden');
+  roleEl.textContent = myRole === 'fox' ? 'Sinä olet: 🦊 Kettu' : 'Sinä olet: 🐰 Kaniini';
+}
+
+function updateStatus() {
+  if (gameMode === 'local') {
+    statusEl.textContent = currentPlayer === 'fox' ? 'Kettu 🦊 vuoro' : 'Kaniini 🐰 vuoro';
+  } else {
+    statusEl.textContent = isMyTurn() ? 'Sinun vuorosi!' : 'Vastustajan vuoro…';
+  }
+}
+
+// ── Local mode ────────────────────────────────────────────────────────────────
+function startLocal() {
+  gameMode = 'local';
+  showGameArea();
+  resetGame();
+}
+
+// ── Host mode ─────────────────────────────────────────────────────────────────
+function startHosting() {
+  const token = generateToken();
+  // Token is placed in the URL #fragment so it is never transmitted to any server
+  el('shareUrl').value = location.origin + location.pathname + '#kjk-' + token;
+  showMpPanel('hostPanel');
+
+  peer = new Peer('kjk-' + token);
+  peer.on('error', err => cancelSession('Yhteysongelma: ' + err.type));
+
+  peer.on('open', () => {
+    let rem = SESSION_SECONDS;
+    updateTimer(rem);
+    sessionTimer = setInterval(() => {
+      rem--;
+      updateTimer(rem);
+      if (rem <= 0) {
+        clearInterval(sessionTimer); sessionTimer = null;
+        cancelSession('Sessio vanheni. Luo uusi peli.');
+      }
+    }, 1000);
+  });
+
+  peer.on('connection', incoming => {
+    if (conn) { incoming.close(); return; } // reject second connection
+    clearInterval(sessionTimer); sessionTimer = null;
+    conn = incoming;
+    const cfg = getRoundConfig(0);
+    roundNumber = 0; myRole = cfg.hostRole; gameMode = 'host';
+    wireConn();
+    const sendStart = () => {
+      conn.send({ type: 'start', guestRole: cfg.guestRole });
+      showGameArea();
+      beginRound();
+    };
+    if (conn.open) { sendStart(); } else { conn.on('open', sendStart); }
+  });
+}
+
+function updateTimer(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  el('sessionTimer').textContent = `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function cancelSession(msg) {
+  cleanupPeer();
+  showModeSelect();
+  if (msg) setTimeout(() => alert(msg), 50);
+}
+
+function copyLink() {
+  const url = el('shareUrl').value;
+  navigator.clipboard.writeText(url).catch(() => {
+    el('shareUrl').select();
+    alert('Kopioi linkki manuaalisesti: Ctrl+C / ⌘C');
+  });
+}
+
+function emailInvite() {
+  const url  = el('shareUrl').value;
+  const sub  = encodeURIComponent('Kutsu: Kettu ja Kaniini');
+  const body = encodeURIComponent(`Liity peliin:\n${url}\n\nLinkki vanhenee 5 minuutissa.`);
+  window.open(`mailto:?subject=${sub}&body=${body}`);
+}
+
+// ── Guest mode ────────────────────────────────────────────────────────────────
+function joinGame() {
+  let t = el('tokenInput').value.trim();
+  if (!t) { alert('Syötä liitymiskoodi!'); return; }
+  // Accept a pasted full share URL (token is in the #fragment), a bare peer ID, or just the token
+  if (t.includes('#kjk-')) {
+    t = t.split('#kjk-')[1];
+  } else if (t.startsWith('kjk-')) {
+    t = t.slice(4);
+  }
+  showMpPanel('connectingPanel');
+
+  peer = new Peer();
+  peer.on('error', err => cancelSession('Yhteysongelma: ' + err.type));
+  peer.on('open', () => {
+    conn = peer.connect('kjk-' + t, { reliable: true });
+    wireConn();
+  });
+}
+
+// ── Connection management ─────────────────────────────────────────────────────
+function wireConn() {
+  conn.on('data', onRemoteData);
+  conn.on('close', onDisconnect);
+  conn.on('error', onDisconnect);
+}
+
+function onDisconnect() {
+  if (!peer) return; // already cleaned up
+  cleanupPeer(); gameMode = 'local';
+  setTimeout(() => { alert('Yhteys katkesi. Peli päättyi.'); showModeSelect(); }, 50);
+}
+
+function onRemoteData(data) {
+  if (data.type === 'start') {
+    gameMode = 'guest'; myRole = data.guestRole; roundNumber = 0;
+    // Clear hash so a page refresh does not attempt to re-join a closed session
+    history.replaceState(null, '', location.pathname + location.search);
+    showGameArea(); beginRound();
+  } else if (data.type === 'move') {
+    applyMove(data.index);
+  } else if (data.type === 'newround') {
+    myRole = data.guestRole; roundNumber = data.roundNumber;
+    beginRound();
+  }
+}
+
+function cleanupPeer() {
+  if (sessionTimer) { clearInterval(sessionTimer); sessionTimer = null; }
+  if (conn) { try { conn.close(); } catch (_) {} conn = null; }
+  if (peer) { try { peer.destroy(); } catch (_) {} peer = null; }
+  myRole = null;
+}
+
+// ── Round / game logic ────────────────────────────────────────────────────────
+
+/** Fox always moves first; who IS fox alternates each round via getRoundConfig() */
+function beginRound() {
+  board = Array(9).fill(null);
+  currentPlayer = 'fox';
+  gameOver = false;
+  resetBtn.style.display = 'none';
+  updateRoleDisplay();
+  updateStatus();
+  updateLockOverlay();
+  drawAll();
+}
+
+// ── Click / tap handler ───────────────────────────────────────────────────────
+function handleClick(e) {
+  if (gameOver || !isMyTurn()) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top)  * (canvas.height / rect.height);
+  const cs = cellSize();
+  const idx = Math.floor(y / cs) * 3 + Math.floor(x / cs);
+  if (board[idx]) return;
+  if (gameMode !== 'local' && conn) conn.send({ type: 'move', index: idx });
+  applyMove(idx);
+}
+
+function applyMove(idx) {
   board[idx] = currentPlayer;
   drawAll();
 
@@ -243,17 +469,18 @@ function handleClick(e) {
   if (winner === 'draw') {
     gameOver = true;
     statusEl.textContent = 'Tasapeli! 🤝';
-    resetBtn.style.display = 'inline-block';
+    if (gameMode !== 'guest') resetBtn.style.display = 'inline-block';
+    lockOverlay.classList.add('hidden');
   } else if (winner) {
     gameOver = true;
-    const name = winner === 'fox' ? 'Kettu 🦊' : 'Kaniini 🐰';
-    statusEl.textContent = `${name} voitti!`;
-    resetBtn.style.display = 'inline-block';
+    statusEl.textContent = (winner === 'fox' ? 'Kettu 🦊' : 'Kaniini 🐰') + ' voitti!';
+    if (gameMode !== 'guest') resetBtn.style.display = 'inline-block';
+    lockOverlay.classList.add('hidden');
     highlightWinner();
   } else {
     currentPlayer = currentPlayer === 'fox' ? 'rabbit' : 'fox';
-    const nextName = currentPlayer === 'fox' ? 'Kettu 🦊' : 'Kaniini 🐰';
-    statusEl.textContent = `${nextName} vuoro`;
+    updateStatus();
+    updateLockOverlay();
   }
 }
 
@@ -282,16 +509,35 @@ canvas.addEventListener('touchstart', e => {
   handleClick({ clientX: t.clientX, clientY: t.clientY });
 }, { passive: false });
 
-// ── Reset ─────────────────────────────────────────────────────────────────
+// ── Reset ─────────────────────────────────────────────────────────────────────
 function resetGame() {
-  board = Array(9).fill(null);
-  currentPlayer = 'fox';
-  gameOver = false;
-  statusEl.textContent = 'Kettu aloittaa! 🦊';
-  resetBtn.style.display = 'none';
-  drawAll();
+  if (gameMode === 'host') {
+    roundNumber++;
+    const cfg = getRoundConfig(roundNumber);
+    myRole = cfg.hostRole;
+    conn.send({ type: 'newround', guestRole: cfg.guestRole, roundNumber });
+    beginRound();
+  } else {
+    // local
+    board = Array(9).fill(null);
+    currentPlayer = 'fox';
+    gameOver = false;
+    statusEl.textContent = 'Kettu aloittaa! 🦊';
+    resetBtn.style.display = 'none';
+    drawAll();
+  }
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
-resizeCanvas();
-drawLegends();
+function returnToMenu() {
+  cleanupPeer(); gameMode = 'local';
+  showModeSelect();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+el('tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') joinGame(); });
+
+if (location.hash.startsWith('#kjk-')) {
+  showMultiplayerSetup();
+} else {
+  showModeSelect();
+}
