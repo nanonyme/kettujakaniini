@@ -4,7 +4,7 @@ A browser-based two-player tic-tac-toe game (Fox vs Rabbit / Kettu ja Kaniini) t
 
 ## Playing
 
-Open `index.html` in a browser (or visit the GitHub Pages deployment).
+Open `index.html` in a browser or **[play it online](https://nanonyme.github.io/kettujakaniini/)**.
 
 ### Local game
 Both players share the same device. Click **Paikallinen peli**.
