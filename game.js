@@ -341,12 +341,12 @@ function startHosting() {
   peer.on('connection', incoming => {
     if (conn) { incoming.close(); return; } // reject second connection
     clearInterval(sessionTimer); sessionTimer = null;
-    peer.disconnect(); // revoke the token immediately — no further connections possible
     conn = incoming;
     const cfg = getRoundConfig(0);
     roundNumber = 0; myRole = cfg.hostRole; gameMode = 'host';
     wireConn();
     const sendStart = () => {
+      peer.disconnect(); // revoke the token once connection is established — no further connections possible
       conn.send({ type: 'start', guestRole: cfg.guestRole });
       showGameArea();
       beginRound();
