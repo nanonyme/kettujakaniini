@@ -10,7 +10,7 @@ let conn = null;
 let myRole = null;        // 'fox' | 'rabbit' (multiplayer only)
 let roundNumber = 0;
 let sessionTimer = null;
-const SESSION_SECONDS = 300; // 5 minutes
+const SESSION_SECONDS = 900; // 15 minutes
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const canvas      = document.getElementById('canvas');
@@ -341,6 +341,7 @@ function startHosting() {
   peer.on('connection', incoming => {
     if (conn) { incoming.close(); return; } // reject second connection
     clearInterval(sessionTimer); sessionTimer = null;
+    peer.disconnect(); // revoke the token immediately — no further connections possible
     conn = incoming;
     const cfg = getRoundConfig(0);
     roundNumber = 0; myRole = cfg.hostRole; gameMode = 'host';
@@ -373,11 +374,16 @@ function copyLink() {
   });
 }
 
-function emailInvite() {
-  const url  = el('shareUrl').value;
-  const sub  = encodeURIComponent('Kutsu: Kettu ja Kaniini');
-  const body = encodeURIComponent(`Liity peliin:\n${url}\n\nLinkki vanhenee 5 minuutissa.`);
-  window.open(`mailto:?subject=${sub}&body=${body}`);
+function shareInvite() {
+  const url = el('shareUrl').value;
+  if (navigator.share) {
+    navigator.share({ title: 'Kettu ja Kaniini', text: 'Liity peliin!', url }).catch(() => {});
+  } else {
+    navigator.clipboard.writeText(url).catch(() => {
+      el('shareUrl').select();
+      alert('Kopioi linkki manuaalisesti: Ctrl+C / ⌘C');
+    });
+  }
 }
 
 // ── Guest mode ────────────────────────────────────────────────────────────────
