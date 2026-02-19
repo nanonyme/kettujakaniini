@@ -1,5 +1,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+.hidden { display: none !important; }
+
 body {
   background: #fdf6e3;
   display: flex;
@@ -18,12 +20,171 @@ h1 {
   letter-spacing: 2px;
 }
 
+/* ── Overlay system ──────────────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(253,246,227,0.97);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.overlay-box {
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 6px 32px rgba(0,0,0,0.15);
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  min-width: 280px;
+  max-width: 420px;
+  width: 100%;
+}
+
+.overlay-box h2 {
+  color: #5a3e1b;
+  font-size: clamp(1.1rem, 5vw, 1.5rem);
+  margin-bottom: 4px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.big-btn {
+  padding: 12px 24px;
+  font-size: clamp(0.95rem, 4vw, 1.1rem);
+  background: #e06c2e;
+  color: #fff;
+  border: none;
+  border-radius: 30px;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(224,108,46,0.3);
+  transition: background 0.2s;
+  width: 100%;
+}
+.big-btn:hover, .big-btn:focus { background: #c05520; }
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #b8860b;
+  font-size: 0.95rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 4px 0;
+}
+.link-btn:hover, .link-btn:focus { color: #5a3e1b; }
+
+/* ── Join row ────────────────────────────────────────────────────────────── */
+.join-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.join-row input {
+  flex: 1;
+  padding: 10px 14px;
+  font-size: 1rem;
+  border: 2px solid #e06c2e;
+  border-radius: 20px;
+  outline: none;
+  font-family: monospace;
+  min-width: 0;
+}
+.join-row input:focus { border-color: #c05520; }
+.join-row .big-btn { width: auto; white-space: nowrap; }
+
+.or-sep {
+  color: #b8860b;
+  font-size: 0.9rem;
+}
+
+/* ── Host panel ──────────────────────────────────────────────────────────── */
+.timer {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #5a3e1b;
+  letter-spacing: 2px;
+}
+
+.mp-label {
+  color: #5a3e1b;
+  text-align: center;
+}
+
+.share-box {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.share-box input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #f8f4ec;
+  font-family: monospace;
+  color: #5a3e1b;
+}
+
+.share-actions {
+  display: flex;
+  gap: 8px;
+}
+.share-actions .big-btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
+/* ── Spinner ─────────────────────────────────────────────────────────────── */
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3e0cc;
+  border-top-color: #e06c2e;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Game area ───────────────────────────────────────────────────────────── */
+#gameArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.role-badge {
+  background: #fff3e0;
+  border: 2px solid #e06c2e;
+  border-radius: 20px;
+  padding: 4px 16px;
+  font-size: clamp(0.85rem, 3.5vw, 1rem);
+  color: #5a3e1b;
+  font-weight: 600;
+}
+
 #status {
   font-size: clamp(0.95rem, 4vw, 1.2rem);
   color: #333;
-  margin-bottom: 12px;
   min-height: 1.6em;
   text-align: center;
+}
+
+#boardWrap {
+  position: relative;
+  display: inline-block;
 }
 
 #canvas {
@@ -36,9 +197,22 @@ h1 {
   max-width: 100%;
 }
 
+.lock-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(253,246,227,0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  font-size: clamp(0.9rem, 3.5vw, 1.1rem);
+  color: #5a3e1b;
+  font-weight: 600;
+  pointer-events: none;
+}
+
 #resetBtn {
   display: none;
-  margin-top: 18px;
   padding: 12px 36px;
   font-size: clamp(1rem, 4vw, 1.2rem);
   background: #e06c2e;
@@ -51,10 +225,12 @@ h1 {
 }
 #resetBtn:hover, #resetBtn:focus { background: #c05520; }
 
+#menuBtn { margin-top: 4px; }
+
 .legend {
   display: flex;
   gap: 24px;
-  margin-top: 14px;
+  margin-top: 6px;
 }
 .legend-item {
   display: flex;

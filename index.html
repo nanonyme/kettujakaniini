@@ -8,19 +8,81 @@
 </head>
 <body>
   <h1>Kettu ja Kaniini</h1>
-  <div id="status">Kettu aloittaa! 🦊</div>
-  <canvas id="canvas"></canvas>
-  <button id="resetBtn" onclick="resetGame()">Uusi peli</button>
-  <div class="legend">
-    <div class="legend-item">
-      <canvas class="legend-canvas" id="legendFox" width="36" height="36"></canvas>
-      <span>Kettu (1.)</span>
-    </div>
-    <div class="legend-item">
-      <canvas class="legend-canvas" id="legendRabbit" width="36" height="36"></canvas>
-      <span>Kaniini (2.)</span>
+
+  <!-- ── Mode-select overlay ──────────────────────────────────────────────── -->
+  <div id="modeOverlay" class="overlay">
+    <div class="overlay-box">
+      <h2>Valitse pelitapa</h2>
+      <button class="big-btn" onclick="startLocal()">🖥️ Paikallinen peli</button>
+      <button class="big-btn" onclick="showMultiplayerSetup()">🌐 Moninpeli</button>
     </div>
   </div>
+
+  <!-- ── Multiplayer-setup overlay ────────────────────────────────────────── -->
+  <div id="mpOverlay" class="overlay hidden">
+    <div class="overlay-box">
+      <h2>Moninpeli</h2>
+
+      <!-- host / join choice -->
+      <div id="mpChoice">
+        <button class="big-btn" onclick="startHosting()">🦊 Luo peli</button>
+        <div class="or-sep">tai</div>
+        <div class="join-row">
+          <input id="tokenInput" type="text" placeholder="Liitymiskoodi…"
+                 maxlength="36" autocomplete="off" spellcheck="false">
+          <button class="big-btn" onclick="joinGame()">Liity →</button>
+        </div>
+        <button class="link-btn" onclick="showModeSelect()">← Takaisin</button>
+      </div>
+
+      <!-- host waiting panel -->
+      <div id="hostPanel" class="hidden">
+        <p class="mp-label">Odotetaan toista pelaajaa…</p>
+        <div id="sessionTimer" class="timer">5:00</div>
+        <div class="share-box">
+          <input id="shareUrl" type="text" readonly>
+          <div class="share-actions">
+            <button class="big-btn" onclick="copyLink()">📋 Kopioi</button>
+            <button class="big-btn" onclick="emailInvite()">📧 Sähköposti</button>
+          </div>
+        </div>
+        <button class="link-btn" onclick="cancelSession()">✕ Peruuta</button>
+      </div>
+
+      <!-- connecting spinner -->
+      <div id="connectingPanel" class="hidden">
+        <p class="mp-label">Yhdistetään…</p>
+        <div class="spinner"></div>
+        <button class="link-btn" onclick="cancelSession()">✕ Peruuta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Game area ─────────────────────────────────────────────────────────── -->
+  <div id="gameArea" class="hidden">
+    <div id="roleIndicator" class="role-badge hidden"></div>
+    <div id="status"></div>
+    <div id="boardWrap">
+      <canvas id="canvas"></canvas>
+      <div id="lockOverlay" class="lock-overlay hidden">
+        <span>Odotetaan vastustajaa…</span>
+      </div>
+    </div>
+    <button id="resetBtn" style="display:none" onclick="resetGame()">Uusi peli</button>
+    <button id="menuBtn" class="link-btn" onclick="returnToMenu()">← Menu</button>
+    <div class="legend">
+      <div class="legend-item">
+        <canvas class="legend-canvas" id="legendFox" width="36" height="36"></canvas>
+        <span>Kettu</span>
+      </div>
+      <div class="legend-item">
+        <canvas class="legend-canvas" id="legendRabbit" width="36" height="36"></canvas>
+        <span>Kaniini</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
