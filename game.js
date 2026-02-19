@@ -9,6 +9,7 @@ let peer = null;
 let conn = null;
 let myRole = null;        // 'fox' | 'rabbit' (multiplayer only)
 let roundNumber = 0;
+let foxStartOffset = 0;   // 0 or 1, randomised per session so first-round fox is not always the host
 let sessionTimer = null;
 const SESSION_SECONDS = 900; // 15 minutes
 
@@ -251,12 +252,13 @@ function isMyTurn() {
 }
 
 /**
- * Even rounds: host=fox (goes first), guest=rabbit.
- * Odd  rounds: host=rabbit, guest=fox (goes first).
+ * Even rounds (adjusted by foxStartOffset): host=fox (goes first), guest=rabbit.
+ * Odd  rounds (adjusted by foxStartOffset): host=rabbit, guest=fox (goes first).
  * Fox always moves first; who IS fox alternates each round.
+ * foxStartOffset is randomised per session so the host is not always fox in round 0.
  */
 function getRoundConfig(n) {
-  return n % 2 === 0
+  return (n + foxStartOffset) % 2 === 0
     ? { hostRole: 'fox',    guestRole: 'rabbit' }
     : { hostRole: 'rabbit', guestRole: 'fox' };
 }
@@ -342,6 +344,7 @@ function startHosting() {
     if (conn) { incoming.close(); return; } // reject second connection
     clearInterval(sessionTimer); sessionTimer = null;
     conn = incoming;
+    foxStartOffset = Math.floor(Math.random() * 2); // randomise who is fox in round 0
     const cfg = getRoundConfig(0);
     roundNumber = 0; myRole = cfg.hostRole; gameMode = 'host';
     wireConn();
@@ -430,6 +433,8 @@ function onRemoteData(data) {
   } else if (data.type === 'newround') {
     myRole = data.guestRole; roundNumber = data.roundNumber;
     beginRound();
+  } else if (data.type === 'requestnewgame') {
+    if (gameMode === 'host' && gameOver) resetGame();
   }
 }
 
@@ -475,12 +480,12 @@ function applyMove(idx) {
   if (winner === 'draw') {
     gameOver = true;
     statusEl.textContent = 'Tasapeli! 🤝';
-    if (gameMode !== 'guest') resetBtn.style.display = 'inline-block';
+    resetBtn.style.display = 'inline-block';
     lockOverlay.classList.add('hidden');
   } else if (winner) {
     gameOver = true;
     statusEl.textContent = (winner === 'fox' ? 'Kettu 🦊' : 'Kaniini 🐰') + ' voitti!';
-    if (gameMode !== 'guest') resetBtn.style.display = 'inline-block';
+    resetBtn.style.display = 'inline-block';
     lockOverlay.classList.add('hidden');
     highlightWinner();
   } else {
@@ -523,6 +528,9 @@ function resetGame() {
     myRole = cfg.hostRole;
     conn.send({ type: 'newround', guestRole: cfg.guestRole, roundNumber });
     beginRound();
+  } else if (gameMode === 'guest') {
+    resetBtn.style.display = 'none';
+    conn.send({ type: 'requestnewgame' });
   } else {
     // local
     board = Array(9).fill(null);
