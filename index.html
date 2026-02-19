@@ -3,9 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>kettujakaniini</title>
+  <title>Kettu ja Kaniini</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>kettujakaniini</h1>
+  <h1>Kettu ja Kaniini</h1>
+  <div id="status">Kettu aloittaa! 🦊</div>
+  <canvas id="canvas"></canvas>
+  <button id="resetBtn" onclick="resetGame()">Uusi peli</button>
+  <div class="legend">
+    <div class="legend-item">
+      <canvas class="legend-canvas" id="legendFox" width="36" height="36"></canvas>
+      <span>Kettu (1.)</span>
+    </div>
+    <div class="legend-item">
+      <canvas class="legend-canvas" id="legendRabbit" width="36" height="36"></canvas>
+      <span>Kaniini (2.)</span>
+    </div>
+  </div>
+  <script src="game.js"></script>
 </body>
 </html>

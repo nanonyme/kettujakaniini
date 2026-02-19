@@ -1,0 +1,66 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #fdf6e3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  padding: 16px;
+}
+
+h1 {
+  font-size: clamp(1.2rem, 5vw, 1.8rem);
+  color: #5a3e1b;
+  margin-bottom: 8px;
+  letter-spacing: 2px;
+}
+
+#status {
+  font-size: clamp(0.95rem, 4vw, 1.2rem);
+  color: #333;
+  margin-bottom: 12px;
+  min-height: 1.6em;
+  text-align: center;
+}
+
+#canvas {
+  display: block;
+  touch-action: none;
+  cursor: pointer;
+  border-radius: 12px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.18);
+  background: #fff;
+  max-width: 100%;
+}
+
+#resetBtn {
+  display: none;
+  margin-top: 18px;
+  padding: 12px 36px;
+  font-size: clamp(1rem, 4vw, 1.2rem);
+  background: #e06c2e;
+  color: #fff;
+  border: none;
+  border-radius: 30px;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(224,108,46,0.35);
+  transition: background 0.2s;
+}
+#resetBtn:hover, #resetBtn:focus { background: #c05520; }
+
+.legend {
+  display: flex;
+  gap: 24px;
+  margin-top: 14px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: clamp(0.85rem, 3.5vw, 1rem);
+  color: #5a3e1b;
+}
+.legend-canvas { border-radius: 6px; }
