@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yksityisyys – Kettu ja Kaniini</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .privacy-box {
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 6px 32px rgba(0,0,0,0.15);
+      padding: 32px 28px;
+      max-width: 520px;
+      width: 100%;
+    }
+    .privacy-box h2 {
+      color: #5a3e1b;
+      font-size: clamp(1.1rem, 5vw, 1.5rem);
+      margin-bottom: 16px;
+    }
+    .privacy-box p {
+      color: #444;
+      font-size: clamp(0.9rem, 3.5vw, 1rem);
+      line-height: 1.7;
+      margin-bottom: 14px;
+    }
+    .privacy-box p:last-of-type { margin-bottom: 0; }
+    .back-link {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Kettu ja Kaniini</h1>
+
+  <div class="privacy-box">
+    <h2>🔒 Miten moninpeli toimii?</h2>
+
+    <p>
+      Kun pelaat moninpeliä, peli yhdistää sinut suoraan kaverisi tietokoneeseen
+      tai puhelimeen. Tähän käytetään <strong>PeerJS</strong>-nimistä apuohjelmaa.
+    </p>
+
+    <p>
+      Jotta yhteys voisi muodostua, PeerJS tarvitsee hetken verran tietää
+      <strong>IP-osoitteesi</strong>. IP-osoite on kuin puhelinnumero internetissä –
+      se kertoo, missä laitteesi sijaitsee verkossa, jotta datapaketteja osataan
+      toimittaa oikeaan paikkaan.
+    </p>
+
+    <p>
+      <strong>Mitä IP-osoitteelle tapahtuu?</strong><br>
+      PeerJS-palvelin käyttää IP-osoitettasi vain yhteyden muodostamiseen.
+      Kun yhteys sinun ja kaverisi välillä on valmis, peli jatkuu suoraan laitteiden
+      välillä eikä palvelin enää osallistu pelaamiseen. IP-osoitettasi
+      <strong>ei tallenneta pysyvästi</strong>.
+    </p>
+
+    <p>
+      <strong>Näkeekö kaverisi missä asut?</strong><br>
+      Ei. IP-osoite ei kerro tarkkaa kotiosoitettasi – se kertoo suunnilleen
+      minkä internet-operaattorin asiakas olet ja missä kaupungissa olet.
+      Kaverisi ei näe IP-osoitettasi suoraan pelin käyttöliittymästä.
+    </p>
+
+    <p>
+      <strong>Muuta kerättyä tietoa?</strong><br>
+      Peli ei kerää eikä tallenna pisteitä, nimiä tai muita henkilötietoja.
+      Kaikki pelidata kulkee suoraan laitteiden välillä eikä siitä jää kopiota
+      palvelimelle.
+    </p>
+
+    <p>
+      Lisätietoa PeerJS:n tietosuojasta löydät osoitteesta
+      <a href="https://peerjs.com" target="_blank" rel="noopener noreferrer">peerjs.com</a>.
+    </p>
+
+    <div class="back-link">
+      <a class="link-btn" href="index.html">← Takaisin peliin</a>
+    </div>
+  </div>
+</body>
+</html>
