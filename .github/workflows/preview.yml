@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  pages: write
   pull-requests: write
 
 concurrency:
@@ -38,6 +39,22 @@ jobs:
           publish_dir: ./dist
           destination_dir: pr-${{ github.event.pull_request.number }}
           keep_files: true
+
+      - name: Configure GitHub Pages to serve from gh-pages branch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.request('PUT /repos/{owner}/{repo}/pages', {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                build_type: 'legacy',
+                source: { branch: 'gh-pages', path: '/' }
+              });
+              console.log('GitHub Pages configured to serve from gh-pages branch');
+            } catch (e) {
+              console.log(`Pages source configuration: ${e.message}`);
+            }
 
       - name: Post or update preview comment
         uses: actions/github-script@v7
