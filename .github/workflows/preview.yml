@@ -5,8 +5,9 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: write
+  contents: read
   pages: write
+  id-token: write
   pull-requests: write
 
 concurrency:
@@ -15,6 +16,9 @@ concurrency:
 
 jobs:
   preview:
+    environment:
+      name: pr-preview/${{ github.event.pull_request.number }}
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,38 +36,30 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Deploy preview to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-          destination_dir: pr-${{ github.event.pull_request.number }}
-          keep_files: true
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
-      - name: Configure GitHub Pages to serve from gh-pages branch
-        uses: actions/github-script@v7
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          script: |
-            try {
-              await github.request('PUT /repos/{owner}/{repo}/pages', {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                build_type: 'legacy',
-                source: { branch: 'gh-pages', path: '/' }
-              });
-              console.log('GitHub Pages configured to serve from gh-pages branch');
-            } catch (e) {
-              console.log(`Pages source configuration: ${e.message}`);
-            }
+          path: './dist'
+
+      - name: Deploy PR preview
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          preview: true
 
       - name: Post or update preview comment
         uses: actions/github-script@v7
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const prNumber = context.payload.pull_request.number;
-            const url = `https://${owner}.github.io/${repo}/pr-${prNumber}/`;
+            const url = process.env.PAGE_URL;
             const marker = '<!-- pr-preview -->';
             const sha = context.payload.pull_request.head.sha;
             const body = `${marker}\n🦊 **Preview ready!** [Open preview](${url})\n\n> _Deployed from commit ${sha}_`;

@@ -41,12 +41,12 @@ npm run typecheck
 
 ## Deployment
 
-The project is deployed via GitHub Pages using the `gh-pages` branch strategy:
+The project is deployed via GitHub Pages using the native GitHub Actions deployment system (`actions/deploy-pages`). Each deployment is an immutable artifact managed by GitHub — no `gh-pages` branch is involved.
 
-- **Stable**: every push to `main` builds and deploys to the root of the `gh-pages` branch.
-- **PR preview**: every pull request builds and deploys to `pr-{number}/` on the `gh-pages` branch. A comment is posted on the PR with the preview URL. The preview directory is removed automatically when the PR is closed.
+- **Stable**: every push to `main` builds and deploys to the `github-pages` environment.
+- **PR preview**: every pull request builds and deploys to a `pr-preview/{number}` environment via `actions/deploy-pages` with `preview: true`. GitHub provides an isolated preview URL, which is posted as a comment on the PR. The preview deployment is deactivated automatically when the PR is closed.
 
-> **Note**: GitHub Pages must be configured to deploy from the **`gh-pages` branch** (Settings → Pages → Source → Deploy from branch → `gh-pages` / `/ (root)`).
+> **Note**: GitHub Pages must be configured to deploy from **GitHub Actions** (Settings → Pages → Source → GitHub Actions).
 
 ## License
 
