@@ -227,6 +227,10 @@ h1 {
 
 #menuBtn { margin-top: 4px; }
 
+/* ── Multiplayer choice links ─────────────────────────────────────────────── */
+#mpChoice .link-btn { display: block; }
+#mpChoice a.link-btn { margin-top: 16px; }
+
 .legend {
   display: flex;
   gap: 24px;
