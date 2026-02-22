@@ -1,0 +1,16 @@
+{
+  "name": "kettujakaniini",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "mkdir -p dist && esbuild src/main.ts --bundle --outfile=dist/game.js --platform=browser --target=es2020 && cp index.html style.css privacy.html dist/",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "esbuild": "^0.27.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  }
+}
