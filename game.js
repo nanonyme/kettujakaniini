@@ -8,9 +8,25 @@ let gameMode = 'local';   // 'local' | 'host' | 'guest'
 let peer = null;
 let conn = null;
 let myRole = null;        // 'fox' | 'rabbit' (multiplayer only)
-let roundNumber = 0;
-let foxStartOffset = 0;   // 0 or 1, randomised per session so first-round fox is not always the host
 let sessionTimer = null;
+
+// Blockchain & Cryptography
+let blockchain = [];          // array of blocks (genesis, move…, score…)
+let moveIndex = 0;            // global move counter, never resets between games
+let firstPlayer = 0;          // 0=host, 1=guest; player index who plays fox (goes first)
+let gameStarter = 0;          // firstPlayer at start of current game; used in score block
+let myKeyPair = null;         // ECDSA P-256 {privateKey, publicKey}
+let myPubKeyB64 = null;       // base64 SPKI export of my public key
+let peerPubKey = null;        // CryptoKey for verifying peer signatures
+let myRandom32 = null;        // Uint8Array(32) – 256-bit random for handshake
+let myCommitHex = null;       // hex SHA-256 of myRandom32
+let peerCommitHex = null;     // hex SHA-256 received from peer
+let peerRandomHex = null;     // hex of peer's 256-bit random (revealed after commit)
+let pendingScoreFrame = null; // score frame awaiting peer's counter-signature
+let myScoreSig = null;        // my hex signature of pendingScoreFrame
+let peerScoreSigHex = null;   // peer's hex signature of pendingScoreFrame
+let resolveHandshakeStep = null; // promise resolver for sequential handshake steps
+let handshakeQueue = [];         // buffer for handshake messages arriving early
 const SESSION_SECONDS = 900; // 15 minutes
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -251,16 +267,237 @@ function isMyTurn() {
   return gameMode === 'local' || myRole === currentPlayer;
 }
 
+// ── Crypto Utilities ──────────────────────────────────────────────────────────
+
+function toHex(bytes) {
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function fromHex(hex) {
+  const arr = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) arr[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  return arr;
+}
+
+async function sha256hex(data) {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return toHex(new Uint8Array(hash));
+}
+
+/** JSON-encode a frame with alphabetically sorted keys (deterministic) */
+function frameToJSON(frame) {
+  return JSON.stringify(frame, Object.keys(frame).sort());
+}
+
+async function generateKeyPair() {
+  return crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']
+  );
+}
+
+async function exportPubKey(key) {
+  const buf = await crypto.subtle.exportKey('spki', key);
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+
+async function importPubKey(b64) {
+  const buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  return crypto.subtle.importKey(
+    'spki', buf, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
+  );
+}
+
+async function signFrame(frame, privateKey) {
+  const data = new TextEncoder().encode(frameToJSON(frame));
+  const sig = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: { name: 'SHA-256' } }, privateKey, data
+  );
+  return toHex(new Uint8Array(sig));
+}
+
+async function verifyFrame(frame, sigHex, publicKey) {
+  const data = new TextEncoder().encode(frameToJSON(frame));
+  return crypto.subtle.verify(
+    { name: 'ECDSA', hash: { name: 'SHA-256' } }, publicKey, fromHex(sigHex), data
+  );
+}
+
+/** SHA-256 of the frame JSON, returned as hex */
+async function hashBlock(block) {
+  return sha256hex(frameToJSON(block.frame));
+}
+
+// ── Blockchain management ─────────────────────────────────────────────────────
+
+/** Map 'fox'/'rabbit' to the player index (0=host, 1=guest) for the current game */
+function getPlayerIndex(player) {
+  return player === 'fox' ? firstPlayer : 1 - firstPlayer;
+}
+
+/** Set myRole based on firstPlayer and gameMode */
+function applyRoles() {
+  if (gameMode === 'local') return;
+  myRole = (gameMode === 'host' ? firstPlayer === 0 : firstPlayer === 1) ? 'fox' : 'rabbit';
+}
+
+/** Show a sync error, disconnect and return to menu */
+function syncError(msg) {
+  gameOver = true;
+  lockOverlay.classList.add('hidden');
+  cleanupPeer();
+  gameMode = 'local';
+  setTimeout(() => { alert('Synkronointivirhe: ' + msg); showModeSelect(); }, 50);
+}
+
+/** Return a promise that resolves with the next message routed through resolveHandshakeStep */
+function waitForMsg() {
+  return new Promise(resolve => {
+    if (handshakeQueue.length > 0) {
+      resolve(handshakeQueue.shift());
+    } else {
+      resolveHandshakeStep = resolve;
+    }
+  });
+}
+
 /**
- * Even rounds (adjusted by foxStartOffset): host=fox (goes first), guest=rabbit.
- * Odd  rounds (adjusted by foxStartOffset): host=rabbit, guest=fox (goes first).
- * Fox always moves first; who IS fox alternates each round.
- * foxStartOffset is randomised per session so the host is not always fox in round 0.
+ * Cryptographic handshake (called by both host and guest after connection opens).
+ * Performs commit-reveal key exchange, derives first_player, builds and signs genesis block.
  */
-function getRoundConfig(n) {
-  return (n + foxStartOffset) % 2 === 0
-    ? { hostRole: 'fox',    guestRole: 'rabbit' }
-    : { hostRole: 'rabbit', guestRole: 'fox' };
+async function initHandshake() {
+  myKeyPair = await generateKeyPair();
+  myPubKeyB64 = await exportPubKey(myKeyPair.publicKey);
+  moveIndex = 0;
+  blockchain = [];
+  handshakeQueue = [];
+  pendingScoreFrame = null;
+  myScoreSig = null;
+  peerScoreSigHex = null;
+
+  // Step 1: exchange public keys
+  conn.send({ type: 'pubkey', key: myPubKeyB64 });
+  const pubkeyMsg = await waitForMsg();
+  peerPubKey = await importPubKey(pubkeyMsg.key);
+
+  // Step 2: exchange SHA-256 commits of 256-bit random numbers
+  myRandom32 = new Uint8Array(32);
+  crypto.getRandomValues(myRandom32);
+  myCommitHex = await sha256hex(myRandom32);
+  conn.send({ type: 'commit', commit: myCommitHex });
+  const commitMsg = await waitForMsg();
+  peerCommitHex = commitMsg.commit;
+
+  // Step 3: reveal random numbers
+  conn.send({ type: 'random', random: toHex(myRandom32) });
+  const randomMsg = await waitForMsg();
+  peerRandomHex = randomMsg.random;
+
+  // Validate peer's commit
+  const peerRandomBytes = fromHex(peerRandomHex);
+  if (await sha256hex(peerRandomBytes) !== peerCommitHex) {
+    syncError('Vastustaja huijasi satunnaisluvulla!'); return;
+  }
+
+  // Determine first_player: parity of all bits in (A XOR B) utilises full entropy of both randoms
+  let xorParity = 0;
+  for (let i = 0; i < 32; i++) xorParity ^= (myRandom32[i] ^ peerRandomBytes[i]);
+  firstPlayer = xorParity & 1;
+  gameStarter = firstPlayer;
+
+  // Step 4: build genesis frame (both parties produce identical JSON)
+  const genesisFrame = {
+    first_player: firstPlayer,
+    host_commit:  gameMode === 'host' ? myCommitHex    : peerCommitHex,
+    host_random:  gameMode === 'host' ? toHex(myRandom32) : peerRandomHex,
+    peer_commit:  gameMode === 'host' ? peerCommitHex  : myCommitHex,
+    peer_random:  gameMode === 'host' ? peerRandomHex  : toHex(myRandom32),
+    type: 'genesis'
+  };
+  const myGenesisSig = await signFrame(genesisFrame, myKeyPair.privateKey);
+  conn.send({ type: 'genesis_sig', signature: myGenesisSig });
+  const genesisSigMsg = await waitForMsg();
+
+  if (!await verifyFrame(genesisFrame, genesisSigMsg.signature, peerPubKey)) {
+    syncError('Geneesilohkon allekirjoitusvirhe!'); return;
+  }
+
+  const hostSig  = gameMode === 'host' ? myGenesisSig           : genesisSigMsg.signature;
+  const guestSig = gameMode === 'host' ? genesisSigMsg.signature : myGenesisSig;
+  blockchain = [{ frame: genesisFrame, signatures: [hostSig, guestSig] }];
+
+  applyRoles();
+  showGameArea();
+  beginRound();
+}
+
+/** Create a signed move block, record it in the blockchain, optionally send to peer */
+async function recordAndApplyMove(idx) {
+  const prevHash = await hashBlock(blockchain[blockchain.length - 1]);
+  const frame = {
+    index:         moveIndex,
+    move:          idx,
+    player:        getPlayerIndex(currentPlayer),
+    previous_hash: prevHash,
+    type:          'move'
+  };
+  const sig = await signFrame(frame, myKeyPair.privateKey);
+  const block = { frame, signatures: [sig] };
+  blockchain.push(block);
+  moveIndex++;
+  if (gameMode !== 'local' && conn) conn.send({ type: 'move', block });
+  applyMove(idx);
+}
+
+/** Receive, validate and apply a move block from the peer */
+async function onRemoteMoveBlock(block) {
+  const prevHash = await hashBlock(blockchain[blockchain.length - 1]);
+  if (block.frame.previous_hash !== prevHash) { syncError('Siirtoketju ei täsmää!'); return; }
+  if (block.frame.player !== getPlayerIndex(currentPlayer)) { syncError('Väärä pelaaja siirtolohkossa!'); return; }
+  if (block.frame.index !== moveIndex) { syncError('Väärä siirtoindeksi!'); return; }
+  if (block.frame.move < 0 || block.frame.move > 8 || board[block.frame.move]) { syncError('Virheellinen siirto!'); return; }
+  if (!await verifyFrame(block.frame, block.signatures[0], peerPubKey)) { syncError('Siirtolohkon allekirjoitus epäkelpo!'); return; }
+  blockchain.push(block);
+  moveIndex++;
+  applyMove(block.frame.move);
+}
+
+/** Sign and (in multiplayer) send score signature; finalize block when both sigs available */
+async function finalizeScore(winner) {
+  const prevHash = await hashBlock(blockchain[blockchain.length - 1]);
+  const frame = {
+    previous_hash: prevHash,
+    starter:       gameStarter,
+    type:          'score',
+    winner:        winner
+  };
+  pendingScoreFrame = frame;
+  myScoreSig = await signFrame(frame, myKeyPair.privateKey);
+  if (gameMode !== 'local') {
+    conn.send({ type: 'score_sig', signature: myScoreSig });
+    if (peerScoreSigHex) await completeScoreBlock();
+  } else {
+    blockchain.push({ frame, signatures: [myScoreSig] });
+  }
+}
+
+/** Handle incoming score_sig from peer */
+async function onScoreSig(sigHex) {
+  peerScoreSigHex = sigHex;
+  if (pendingScoreFrame && myScoreSig) await completeScoreBlock();
+}
+
+/** Validate peer's score signature and commit the final score block */
+async function completeScoreBlock() {
+  if (!await verifyFrame(pendingScoreFrame, peerScoreSigHex, peerPubKey)) {
+    syncError('Pistelohkon allekirjoitus epäkelpo!'); return;
+  }
+  const hostSig  = gameMode === 'host' ? myScoreSig    : peerScoreSigHex;
+  const guestSig = gameMode === 'host' ? peerScoreSigHex : myScoreSig;
+  blockchain.push({ frame: pendingScoreFrame, signatures: [hostSig, guestSig] });
+  pendingScoreFrame = null;
+  myScoreSig = null;
+  peerScoreSigHex = null;
 }
 
 function el(id) { return document.getElementById(id); }
@@ -311,10 +548,28 @@ function updateStatus() {
 }
 
 // ── Local mode ────────────────────────────────────────────────────────────────
-function startLocal() {
+async function startLocal() {
   gameMode = 'local';
+  myKeyPair = await generateKeyPair();
+  myRandom32 = new Uint8Array(32);
+  crypto.getRandomValues(myRandom32);
+  myCommitHex = await sha256hex(myRandom32);
+  firstPlayer = 0;
+  gameStarter = 0;
+  moveIndex = 0;
+  // Genesis block for local game – only host signature
+  const genesisFrame = {
+    first_player: 0,
+    host_commit:  myCommitHex,
+    host_random:  toHex(myRandom32),
+    peer_commit:  null,
+    peer_random:  null,
+    type: 'genesis'
+  };
+  const sig = await signFrame(genesisFrame, myKeyPair.privateKey);
+  blockchain = [{ frame: genesisFrame, signatures: [sig] }];
   showGameArea();
-  resetGame();
+  beginRound();
 }
 
 // ── Host mode ─────────────────────────────────────────────────────────────────
@@ -344,17 +599,13 @@ function startHosting() {
     if (conn) { incoming.close(); return; } // reject second connection
     clearInterval(sessionTimer); sessionTimer = null;
     conn = incoming;
-    foxStartOffset = Math.floor(Math.random() * 2); // randomise who is fox in round 0
-    const cfg = getRoundConfig(0);
-    roundNumber = 0; myRole = cfg.hostRole; gameMode = 'host';
+    gameMode = 'host';
     wireConn();
-    const sendStart = () => {
+    const doHandshake = () => {
       peer.disconnect(); // revoke the token once connection is established — no further connections possible
-      conn.send({ type: 'start', guestRole: cfg.guestRole });
-      showGameArea();
-      beginRound();
+      initHandshake().catch(e => cancelSession('Yhteysongelma: ' + e.message));
     };
-    if (conn.open) { sendStart(); } else { conn.on('open', sendStart); }
+    if (conn.open) { doHandshake(); } else { conn.on('open', doHandshake); }
   });
 }
 
@@ -405,7 +656,12 @@ function joinGame() {
   peer.on('error', err => cancelSession('Yhteysongelma: ' + err.type));
   peer.on('open', () => {
     conn = peer.connect('kjk-' + t, { reliable: true });
+    gameMode = 'guest';
     wireConn();
+    conn.on('open', () => {
+      history.replaceState(null, '', location.pathname + location.search);
+      initHandshake().catch(e => cancelSession('Yhteysongelma: ' + e.message));
+    });
   });
 }
 
@@ -423,15 +679,23 @@ function onDisconnect() {
 }
 
 function onRemoteData(data) {
-  if (data.type === 'start') {
-    gameMode = 'guest'; myRole = data.guestRole; roundNumber = 0;
-    // Clear hash so a page refresh does not attempt to re-join a closed session
-    history.replaceState(null, '', location.pathname + location.search);
-    showGameArea(); beginRound();
+  // Route handshake messages to the sequential initHandshake() coroutine
+  if (['pubkey', 'commit', 'random', 'genesis_sig'].includes(data.type)) {
+    if (resolveHandshakeStep) {
+      const resolve = resolveHandshakeStep;
+      resolveHandshakeStep = null;
+      resolve(data);
+    } else {
+      handshakeQueue.push(data);
+    }
   } else if (data.type === 'move') {
-    applyMove(data.index);
+    onRemoteMoveBlock(data.block).catch(e => console.error(e));
+  } else if (data.type === 'score_sig') {
+    onScoreSig(data.signature).catch(e => console.error(e));
   } else if (data.type === 'newround') {
-    myRole = data.guestRole; roundNumber = data.roundNumber;
+    gameStarter = data.starter;
+    firstPlayer = data.starter;
+    applyRoles();
     beginRound();
   } else if (data.type === 'requestnewgame') {
     if (gameMode === 'host' && gameOver) resetGame();
@@ -447,11 +711,14 @@ function cleanupPeer() {
 
 // ── Round / game logic ────────────────────────────────────────────────────────
 
-/** Fox always moves first; who IS fox alternates each round via getRoundConfig() */
+/** Fox always moves first; who IS fox is determined by firstPlayer from genesis/newround */
 function beginRound() {
   board = Array(9).fill(null);
   currentPlayer = 'fox';
   gameOver = false;
+  pendingScoreFrame = null;
+  myScoreSig = null;
+  peerScoreSigHex = null;
   resetBtn.style.display = 'none';
   updateRoleDisplay();
   updateStatus();
@@ -468,8 +735,7 @@ function handleClick(e) {
   const cs = cellSize();
   const idx = Math.floor(y / cs) * 3 + Math.floor(x / cs);
   if (board[idx]) return;
-  if (gameMode !== 'local' && conn) conn.send({ type: 'move', index: idx });
-  applyMove(idx);
+  recordAndApplyMove(idx).catch(e => console.error(e));
 }
 
 function applyMove(idx) {
@@ -482,12 +748,14 @@ function applyMove(idx) {
     statusEl.textContent = 'Tasapeli! 🤝';
     resetBtn.style.display = 'inline-block';
     lockOverlay.classList.add('hidden');
+    finalizeScore('draw').catch(e => console.error(e));
   } else if (winner) {
     gameOver = true;
     statusEl.textContent = (winner === 'fox' ? 'Kettu 🦊' : 'Kaniini 🐰') + ' voitti!';
     resetBtn.style.display = 'inline-block';
     lockOverlay.classList.add('hidden');
     highlightWinner();
+    finalizeScore(winner).catch(e => console.error(e));
   } else {
     currentPlayer = currentPlayer === 'fox' ? 'rabbit' : 'fox';
     updateStatus();
@@ -523,22 +791,17 @@ canvas.addEventListener('touchstart', e => {
 // ── Reset ─────────────────────────────────────────────────────────────────────
 function resetGame() {
   if (gameMode === 'host') {
-    roundNumber++;
-    const cfg = getRoundConfig(roundNumber);
-    myRole = cfg.hostRole;
-    conn.send({ type: 'newround', guestRole: cfg.guestRole, roundNumber });
+    gameStarter = (gameStarter + 1) % 2;
+    firstPlayer = gameStarter;
+    applyRoles();
+    conn.send({ type: 'newround', starter: gameStarter });
     beginRound();
   } else if (gameMode === 'guest') {
     resetBtn.style.display = 'none';
     conn.send({ type: 'requestnewgame' });
   } else {
-    // local
-    board = Array(9).fill(null);
-    currentPlayer = 'fox';
-    gameOver = false;
-    statusEl.textContent = 'Kettu aloittaa! 🦊';
-    resetBtn.style.display = 'none';
-    drawAll();
+    // local – blockchain continues, fox always starts (firstPlayer stays 0)
+    beginRound();
   }
 }
 
