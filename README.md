@@ -10,8 +10,8 @@ Open `index.html` in a browser or **[play it online](https://nanonyme.github.io/
 Both players share the same device. Click **Paikallinen peli**.
 
 ### Multiplayer (WebRTC)
-1. One player clicks **Moninpeli → Luo peli**. A shareable link is generated and a 5-minute countdown starts.
-2. The link is copied or emailed to the second player. The session token lives **only in the URL fragment (`#`)** and is never sent to any server.
+1. One player clicks **Moninpeli → Luo peli**. A shareable link is generated and a 15-minute countdown starts.
+2. The link is copied or shared to the second player. The session token lives **only in the URL fragment (`#`)** and is never sent to any server.
 3. The second player opens the link and clicks **Liity**. A direct peer-to-peer WebRTC connection is established — no game data passes through any server.
 4. Each player is shown their role (🦊 Kettu / 🐰 Kaniini). The starting player alternates every round. The board is locked while it is the opponent's turn.
 5. If the connection drops the game ends; there is no reconnection.
